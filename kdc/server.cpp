@@ -199,7 +199,7 @@ void* per_user(void* void_connfd){
 			remove_user(connfd); // Remove active-user
 			return 0; //End thread;
      	}
-     	else if(!command.compare("/secret_msg") && logged_in){
+     	else if(!command.compare("/msg") && logged_in){
      		try{
      			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 				string to(pch);

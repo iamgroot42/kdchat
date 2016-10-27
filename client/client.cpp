@@ -19,6 +19,8 @@
 using namespace std;
 // Indicator variables for status of server connection, login status
 bool server_down = false, logged_in = false;
+map<string,string> stage_two;
+map<string,string> kdc_resp;
 
 // Send data via the given socket-fd
 int send_data(string data, int sock){
@@ -47,6 +49,31 @@ void* server_feedback(void* void_listenfd){
 		buffer[ohho] = 0;
 		// Normal conversation; display on console
 		cout<<">> "<<buffer<<endl;	
+		char *pch = strtok_r(buffer," ", &STRTOK_SHARED);
+		string command(pch);
+		if(!command.compare("/handshake")){
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string alice(pch);
+			srand(time(NULL));
+			long nonce_B = long(rand());
+			string encrypted_packet = encrypt(alice + " " + to_string(nonce_B), private_key);
+			// Generate a nonce and return it with A, encrypted with Kbs
+			string ret_ticket = "/check_ticket " + alice + " " + encrypted_packet;
+			send_data(ret_ticket, listenfd);
+		}
+		else if(!command.compare("/receive_key")){
+			string data(pch);
+			data = decrypt(data, private_key);
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string shared_key(pch);
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string A(pch);
+			// Assert that this is the same user as the one from which I received this packet
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string nonceB(pch);
+			// Assert that this nonce is the same as the one I sent
+			// Set global flag indicating successful NS exchange
+		}
 	}
 }
 
@@ -72,6 +99,48 @@ int create_socket_and_connect(char* address, int port){
     return sock;
 }
 
+string negotiate_key(int irc_sock, string alice, string bob){
+	// Send a message to B, with my username
+	string send, b_ticket, kdc_response;
+	send = "/handshake " + alice;
+	send_data(send, irc_sock);
+	// B replies with (A,nonceB)Kbs
+	while(1){
+		nanosleep(1e5);
+		if(stage_two.find(bob) != stage_two.end()){
+			b_ticket = stage_two[bob];
+			break;
+		}
+	}
+	srand(time(NULL));
+	// A sends a request to KDC with A,B,nonceA and above packet
+	long nonceA = long(rand());
+	send = "/negotiate " +  alice + " " + bob + " " + to_string(nonceA) + " " + b_ticket;
+	send_data(send, irc_sock);
+	// Server responds with (nonceA, Kab, B, (Kab,A,nonceB)Kbs)Kas
+	while(1){
+		nanosleep(1e5);
+		if(kdc_resp.find(bob) != kdc_resp.end()){
+			kdc_response = kdc_resp[bob];
+			break;
+		}
+	}
+	kdc_response = decrypt(kdc_response);
+	char* buffer = kdc_response.c_str();
+	char *pch = strtok_r(buffer," ", &STRTOK_SHARED);
+	string a_nonce(pch);
+	pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+	string Kab(pch);
+	pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+	string bob_check(pch);
+	pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+	string send_to_b(pch);
+	// A sends (Kab,A,nonceB)Kbs as it is to B
+	send = "/receive_key " + send_to_b;
+	send_data(send, irc_sock);
+	// At this stage, both parties have the shared key, which can be used for encryption
+	return Kab;
+}
 
 int main(int argc, char *argv[]){
 	// Argument: IP address of server
@@ -89,12 +158,34 @@ int main(int argc, char *argv[]){
     // Create thread for receiving messages on register socket
 	pthread_t pot2;
     pthread_create(&pot2, NULL, server_feedback, (void*)register_sock);
-	string send, username, password, command;
+	string send, username, password, command,current_username = "";
 	cout<<">> Welcome to kdchat!"<<endl;
+	cout<<">> 1. Idenfity yourself\n>> 2. Register"<<endl;
+	int option;
+	// Log in/Register user
+	cin>>option;
+	if(option == 1){
+		cout<<">> Enter your username"<<endl;
+		cin>>current_username;
+	}
+	else{
+		REGISTER_YOURSELF:
+		cin>>user
+		cin>>password;
+		send = username + " " + password;
+		current_username = username;
+		if(!send_data(send, register_sock)){
+			cout<<">> Error in registration. Please try again."<<endl;
+			goto REGISTER_YOURSELF;
+		}
+	}
 	while(1){
 		// Kill main thread if server is down.
 		if(server_down){
 			return 0;
+		}
+		if(current_username.empty()){
+			cout<<">> Identify yourself/Register "
 		}
 		cin>>command;
 		if(!command.compare("/exit")){
@@ -115,34 +206,13 @@ int main(int argc, char *argv[]){
 				return 0;
 			}
 		}
-		else if(!command.compare("/register")){
-			cin>>username;
-			cin>>password;
-			send = username + " " + password;
-			if(!send_data(send, register_sock)){
-				cout<<">> Error in registration. Please try again."<<endl;
-			}
-		}
-		else if(!command.compare("/login")){	
-			cin>>username;
-			cin>>password;
-			if(logged_in){
-				cout<<">> Already logged in!"<<endl;
-			}
-			else{
-				send = "/login " + username + " " + password;
-				if(!send_data(send, irc_sock)){
-					cout<<">> Error logging-in. Please try again."<<endl;
-				}
-			}
-		}
 		else if(!command.compare("/who") && logged_in){
 			send = command + " " +  username + " " + password;
 			if(!send_data(send, irc_sock)){
 				cout<<">> Error communicating with server. Please try again."<<endl;
 			}
 		}
-		else if(!command.compare("/secret_msg") && logged_in){
+		else if(!command.compare("/msg") && logged_in){
 			cin>>username;
 			getline(cin, password);
 			send = command + " " + username + " " + password;
