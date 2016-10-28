@@ -11,12 +11,12 @@
 
 #define REGISTER_PORT 5004 //Port for registrations
 #define IRC_PORT 5005 //Port for normal communication
-#define BUFFER_SIZE 512 //Maximum size per message
+#define BUFFER_SIZE 1024 //Maximum size per message
 #define USER_FILENAME "users" //Filename containing username & passwords
 
 using namespace std;
 
-// Basically creates a 1-1 mapping between current socket and username (for efficient access)
+// Create a 1-1 mapping between current socket and username (for efficient access)
 map<string,int> name_id;
 map<int,string> id_name;
 // A set of FDs of currently active users
@@ -25,8 +25,6 @@ set<int> active_users;
 map<string, string> username_password;
 // A queue which contains outgoing p2p data
 queue< pair<int, string> > chat;
-// Mutex locks for all shared variables
-mutex name_id_l, id_name_l, active_users_l, username_password_l, chat_l;
 
 // Send data back to the client
 int send_data(string data, int sock)
@@ -93,10 +91,7 @@ void* register_user(void* argv){
             string username(pch);
             pch = strtok_r (NULL, " ", &STRTOK_SHARED);
             string password(pch);
-            // Mutex lock
-            username_password_l.lock();
             username_password.insert(make_pair(username,password));
-            username_password_l.unlock();
             send_data(confirm, connfd);
             // Write to file (not working rn)
             file<<username<<" "<<password<<endl;
@@ -107,40 +102,26 @@ void* register_user(void* argv){
 
 // Checks if the given combination is valid, and this user is currently logged in
 bool is_online(int x){
-	// Mutex lock
-	active_users_l.lock();
 	if(active_users.find(x) != active_users.end()){
-    	active_users_l.unlock();
     	return true;
     }
-    active_users_l.unlock();
     return false;
 }
 
 // String representation of all users currently online
 string online_users(){
 	string ret_val = "";
-	// Mutex lock
-	active_users_l.lock();
 	for (set<int>::iterator it=active_users.begin(); it!=active_users.end(); ++it){
 		ret_val += id_name[*it] + "\n";
 	}
-	active_users_l.unlock();
 	return ret_val.substr(0, ret_val.size()-1);
 }
 
 // Client ended connection; remove everything associated with them
 void remove_user(int c){
-	// Mutex lock
-	active_users_l.lock();
-	name_id_l.lock();
-	id_name_l.lock();
 	active_users.erase(c);
 	name_id.erase(id_name[c]);
 	id_name.erase(c);
-	active_users_l.unlock();
-	name_id_l.unlock();
-	id_name_l.unlock();
 	// Close this connection
 	close(c);
 }
@@ -171,18 +152,11 @@ void* per_user(void* void_connfd){
 				string username(pch);
 				if(logged_in){
 					send_data("Signed in!", connfd);
-					// Mutex lock
-					name_id_l.lock();
-					id_name_l.lock();
-					active_users_l.lock(); 
-                    // Update 1-1(effective) mapping of connectionID and username
+					// Update 1-1(effective) mapping of connectionID and username
                     current_username = username;
 					name_id[username] = connfd;
 					id_name[connfd] = username;
 					active_users.insert(connfd); // Update list of active users
-					name_id_l.unlock();
-					id_name_l.unlock();
-					active_users_l.unlock(); 
 				}
 				else{
 					send_data("Error signing in!", connfd);
@@ -205,15 +179,10 @@ void* per_user(void* void_connfd){
 				string to(pch);
 				pch = strtok_r (NULL, "", &STRTOK_SHARED);
 				string data(pch);
-				// Mutex lock
-				chat_l.lock();
-                name_id_l.lock();
 				if (!is_online(name_id[to])){
 					send_data("User is offline/doesn't exist!", connfd);
 				}
 				chat.push(make_pair(name_id[to], data)); // Push outgoing message to queue
-                name_id_l.unlock();
-                chat_l.unlock();
 			}
 			catch(...){
 				send_data("Malformed message!", connfd);
@@ -252,18 +221,18 @@ void* send_back(void* argv){
 	pair<int, string> x;
 	while(true){
 		while(chat.size()){
-			// Mutex lock
-			chat_l.lock();
 			x = chat.front();
 			chat.pop();
-			string formatted = "(" + id_name[x.first] + ") " + x.second;
+			string formatted = x.second;
+			if(formatted is a message){
+				formatted = "(" + id_name[x.first] + ") " + x.second;
+			}
 			send_data(formatted, x.first);
-			chat_l.unlock();
 		}	
 	}
 }
 
-
+// Main process
 int main(){
     pthread_t pot,pot2;
     // Thread to handle registrations

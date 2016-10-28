@@ -14,7 +14,7 @@
 
 #define REGISTER_PORT 5004 //Port for registrations
 #define IRC_PORT 5005 //Port for normal communication
-#define BUFFER_SIZE 512 //Maximum size per message
+#define BUFFER_SIZE 1024 //Maximum size per message
 
 using namespace std;
 // Indicator variables for status of server connection, login status
@@ -49,10 +49,14 @@ void* server_feedback(void* void_listenfd){
 		}
 		buffer[ohho] = 0;
 		// Normal conversation; display on console
-		cout<<">> "<<buffer<<endl;	
 		char *pch = strtok_r(buffer," ", &STRTOK_SHARED);
 		string command(pch);
-		if(!command.compare("/handshake")){
+		if(!command.compare("/msg")){
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string message(pch);
+			cout<<">> "<<message<<endl;
+		}
+		else if(!command.compare("/handshake")){
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string alice(pch);
 			srand(time(NULL));
