@@ -57,6 +57,19 @@ void populate_userlist(){
   	}
 }
 
+string encrypt(string data, string key){
+	return data;
+}
+
+string decrypt(string data, string key){
+	return data;
+}
+
+// Create a shared-key for Alice and Bob
+string mutual_key(string alice, string bob){
+	return username_password[alice] + "ohho" + username_password[bob];
+}
+
 // Thread to listen to register users
 void* register_user(void* argv){
 	// Populate username_password
@@ -190,23 +203,31 @@ void* per_user(void* void_connfd){
      	}
      	else if(!command.compare("/negotiate") && logged_in){
      		try{
-     			// Decrypt received packet using Kas
-     			pch = decrypt(pch,a_privatekey).c_str();
-     			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+     			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
      			string alice(pch);
-     			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+     			// Assert is Alice sent this packet
+     			assert(!alice.compare(id_name[connfd]));
+     			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
      			string bob(pch);
-     			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+     			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
      			string a_nonce(pch);
-     			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+     			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
      			string b_ticket(pch);
      			// Decrypt b_ticket to extract B_nonce
-     			b_ticket = decrypt(b_ticket,b_privatekey);
-     			// Come up with Kas
-     			string b_retticket;
-     			b_retticket = encrpyt(Kab + " " + alice + " " + B_nonce, b_privatekey);
+     			b_ticket = decrypt(b_ticket, username_password[bob]);
+     			char *dup = strdup(b_ticket.c_str());
+     			char *temp = strtok_r(dup," ", &STRTOK_SHARED);
+     			string should_be_alice(temp);
+     			// Unnecessary check
+     			assert(!should_be_alice.compare(alice));
+     			string b_nonce(strtok_r(NULL," ", &STRTOK_SHARED));
+     			// Come up with Kab	
+     			string b_retticket, Kab;
+     			Kab = mutual_key(alice, bob);
+     			b_retticket = Kab + " " + alice + " " + b_nonce;
+     			b_retticket = encrypt(b_retticket, username_password[bob]);
      			string data = a_nonce + " " + Kab + " " + bob + " " + b_retticket;
-     			data = encrypt(data,a_privatekey);
+     			data = encrypt(data, username_password[alice]);
      			chat.push(make_pair(name_id[alice], "/negotiated_key " + data));
      		}
      		catch(...){
@@ -224,7 +245,8 @@ void* send_back(void* argv){
 			x = chat.front();
 			chat.pop();
 			string formatted = x.second;
-			if(formatted is a message){
+			string msg("/msg");
+			if(!formatted.compare(0, msg.length(), msg)){
 				formatted = "(" + id_name[x.first] + ") " + x.second;
 			}
 			send_data(formatted, x.first);

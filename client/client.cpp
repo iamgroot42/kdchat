@@ -19,9 +19,10 @@
 using namespace std;
 // Indicator variables for status of server connection, login status
 bool server_down = false, logged_in = false;
-map<string,string> stage_two;
-map<string,string> kdc_resp;
+map<string,string> shared_keys;
+map<string, string> sent_nonce;
 set<string> good_to_go;
+string my_username, my_private_key, self_nonce;
 
 // Send data via the given socket-fd
 int send_data(string data, int sock){
@@ -32,10 +33,19 @@ int send_data(string data, int sock){
     return 1;
 }
 
+string encrypt(string data, string key){
+	return data;
+}
+
+string decrypt(string data, string key){
+	return data;
+}
+
 // Thread to read incoming data (from server)
 void* server_feedback(void* void_listenfd){
 	long listenfd = (long)void_listenfd;
 	char buffer[BUFFER_SIZE];
+	char* STRTOK_SHARED;
 	int ohho = 0;
 	while(1){
 		memset(buffer,'0',sizeof(buffer));
@@ -61,15 +71,16 @@ void* server_feedback(void* void_listenfd){
 			string alice(pch);
 			srand(time(NULL));
 			long nonce_B = long(rand());
-			string encrypted_packet = encrypt(alice + " " + to_string(nonce_B), private_key);
+			sent_nonce[alice] = to_string(nonce_B);
+			string encrypted_packet = encrypt(alice + " " + to_string(nonce_B), my_private_key);
 			// Generate a nonce and return it with A, encrypted with Kbs
-			string ret_ticket = "/check_ticket " + alice + " " + encrypted_packet;
+			string ret_ticket = "/check_ticket " + alice + " " +  encrypted_packet;
 			send_data(ret_ticket, listenfd);
 		}
 		else if(!command.compare("/receive_key")){
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string data(pch);
-			data = decrypt(data, private_key);
+			data = decrypt(data, my_private_key);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string shared_key(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
@@ -81,45 +92,53 @@ void* server_feedback(void* void_listenfd){
 			// Set global flag indicating successful NS exchange
 		}
 		else if(!command.compare("/check_ticket")){
+			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
+			string bob(pch);
 			// Extract b_ticket
-			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-			string check_me(pch);
-			// Assert check_me == alice
-			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
 			string b_ticket(pch);
 			srand(time(NULL));
 			// A sends a request to KDC with A,B,nonceA and above packet
-			long nonceA = long(rand());
-			send = "/negotiate " +  alice + " " + bob + " " + to_string(nonceA) + " " + b_ticket;
-			send_data(send, irc_sock);	
+			self_nonce = to_string(long(rand()));
+			string send = "/negotiate " +  my_username + " " + bob + " " + self_nonce + " " + b_ticket;
+			send_data(send, listenfd);	
 		}
 		else if(!command.compare("/negotiated_key")){
-			pch = decrypt(pch,a_privatekey).c_str();
-			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string decr_this(STRTOK_SHARED);
+			char *dup = strdup(decrypt(decr_this, my_private_key).c_str());
+			pch = strtok_r (dup, " ", &STRTOK_SHARED);
 			string nonce_a(pch);
+			//Verify that nonce is same
+			assert(!self_nonce.compare(nonce_a));
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string k_ab(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string bob(pch);
+			// Set shared key for future communication
+			shared_keys[bob] = k_ab;
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string bob_confirmticket(pch);
 			// Forward confirm_ticket as it is to bob
 			string send = "/bob_receive " + bob + " " + bob_confirmticket;
-			send_data(send, irc_sock);
+			send_data(send, listenfd);
 		}
-		else if(!command.compare("/negotiated_key")){
-			pch = decrypt(pch,b_privatekey).c_str();
-			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-			string kab(pch);
+		else if(!command.compare("/bob_receive")){
+			char *dup = strdup(decrypt(pch, my_private_key).c_str());
+			pch = strtok_r (dup, " ", &STRTOK_SHARED);
+			string k_ab(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string alice(pch);
+			// Set shared key for future communication
+			shared_keys[alice] = k_ab;
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string b_nonce(pch);
 			// Check that bnonce hasn't been tampered with
-			send_data("/okay " + alice, irc_sock);
+			assert(!b_nonce.compare(self_nonce));
+			send_data("/okay " + alice, listenfd);
 		}
 		else if(!command.compare("/okay")){
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string bob(pch);
 			// we can now start exchanging encrypted messages with bob
 			good_to_go.insert(bob);
 		}
@@ -177,10 +196,9 @@ int main(int argc, char *argv[]){
 	}
 	else{
 		REGISTER_YOURSELF:
-		cin>>user
+		cin>>current_username;
 		cin>>password;
-		send = username + " " + password;
-		current_username = username;
+		send = current_username + " " + password;
 		if(!send_data(send, register_sock)){
 			cout<<">> Error in registration. Please try again."<<endl;
 			goto REGISTER_YOURSELF;
@@ -192,7 +210,7 @@ int main(int argc, char *argv[]){
 			return 0;
 		}
 		if(current_username.empty()){
-			cout<<">> Identify yourself/Register "
+			cout<<">> Identify yourself/Register"<<endl;
 		}
 		cin>>command;
 		if(!command.compare("/exit")){
@@ -221,8 +239,9 @@ int main(int argc, char *argv[]){
 		}
 		else if(!command.compare("/msg") && logged_in){
 			cin>>username;
-			if(good_to_go.find(username) != good_to_go.end() && !session_key.empty()){
+			if(good_to_go.find(username) != good_to_go.end() && !shared_keys.count(username)){
 				getline(cin, password);
+				password = encrypt(password, shared_keys[username]);
 				send = command + " " + username + " " + password;
 			}
 			else{
@@ -234,7 +253,7 @@ int main(int argc, char *argv[]){
 		}
 		else if(!command.compare("/handshake")){
 			cin>>username;
-			send = "/handshake " + bob + " " + alice;
+			send = "/handshake " + username + " " + my_username;
 			send_data(send, irc_sock);
 		}
 		else{
