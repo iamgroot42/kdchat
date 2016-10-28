@@ -21,6 +21,7 @@ using namespace std;
 bool server_down = false, logged_in = false;
 map<string,string> stage_two;
 map<string,string> kdc_resp;
+set<string> good_to_go;
 
 // Send data via the given socket-fd
 int send_data(string data, int sock){
@@ -62,6 +63,7 @@ void* server_feedback(void* void_listenfd){
 			send_data(ret_ticket, listenfd);
 		}
 		else if(!command.compare("/receive_key")){
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string data(pch);
 			data = decrypt(data, private_key);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
@@ -73,6 +75,49 @@ void* server_feedback(void* void_listenfd){
 			string nonceB(pch);
 			// Assert that this nonce is the same as the one I sent
 			// Set global flag indicating successful NS exchange
+		}
+		else if(!command.compare("/check_ticket")){
+			// Extract b_ticket
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string check_me(pch);
+			// Assert check_me == alice
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string b_ticket(pch);
+			srand(time(NULL));
+			// A sends a request to KDC with A,B,nonceA and above packet
+			long nonceA = long(rand());
+			send = "/negotiate " +  alice + " " + bob + " " + to_string(nonceA) + " " + b_ticket;
+			send_data(send, irc_sock);	
+		}
+		else if(!command.compare("/negotiated_key")){
+			pch = decrypt(pch,a_privatekey).c_str();
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string nonce_a(pch);
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string k_ab(pch);
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string bob(pch);
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string bob_confirmticket(pch);
+			// Forward confirm_ticket as it is to bob
+			string send = "/bob_receive " + bob + " " + bob_confirmticket;
+			send_data(send, irc_sock);
+		}
+		else if(!command.compare("/negotiated_key")){
+			pch = decrypt(pch,b_privatekey).c_str();
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string kab(pch);
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string alice(pch);
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string b_nonce(pch);
+			// Check that bnonce hasn't been tampered with
+			send_data("/okay " + alice, irc_sock);
+		}
+		else if(!command.compare("/okay")){
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			// we can now start exchanging encrypted messages with bob
+			good_to_go.insert(bob);
 		}
 	}
 }
@@ -99,48 +144,6 @@ int create_socket_and_connect(char* address, int port){
     return sock;
 }
 
-string negotiate_key(int irc_sock, string alice, string bob){
-	// Send a message to B, with my username
-	string send, b_ticket, kdc_response;
-	send = "/handshake " + alice;
-	send_data(send, irc_sock);
-	// B replies with (A,nonceB)Kbs
-	while(1){
-		nanosleep(1e5);
-		if(stage_two.find(bob) != stage_two.end()){
-			b_ticket = stage_two[bob];
-			break;
-		}
-	}
-	srand(time(NULL));
-	// A sends a request to KDC with A,B,nonceA and above packet
-	long nonceA = long(rand());
-	send = "/negotiate " +  alice + " " + bob + " " + to_string(nonceA) + " " + b_ticket;
-	send_data(send, irc_sock);
-	// Server responds with (nonceA, Kab, B, (Kab,A,nonceB)Kbs)Kas
-	while(1){
-		nanosleep(1e5);
-		if(kdc_resp.find(bob) != kdc_resp.end()){
-			kdc_response = kdc_resp[bob];
-			break;
-		}
-	}
-	kdc_response = decrypt(kdc_response);
-	char* buffer = kdc_response.c_str();
-	char *pch = strtok_r(buffer," ", &STRTOK_SHARED);
-	string a_nonce(pch);
-	pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-	string Kab(pch);
-	pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-	string bob_check(pch);
-	pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-	string send_to_b(pch);
-	// A sends (Kab,A,nonceB)Kbs as it is to B
-	send = "/receive_key " + send_to_b;
-	send_data(send, irc_sock);
-	// At this stage, both parties have the shared key, which can be used for encryption
-	return Kab;
-}
 
 int main(int argc, char *argv[]){
 	// Argument: IP address of server
@@ -214,12 +217,21 @@ int main(int argc, char *argv[]){
 		}
 		else if(!command.compare("/msg") && logged_in){
 			cin>>username;
-			getline(cin, password);
-			send = command + " " + username + " " + password;
-			// Check if session key is stale or not. If it is, re-negotiate it with KDC
+			if(good_to_go.find(username) != good_to_go.end() && !session_key.empty()){
+				getline(cin, password);
+				send = command + " " + username + " " + password;
+			}
+			else{
+				cout<<">> Shared key not negotiated. Please run /negotiate."<<endl;
+			}
 			if(!send_data(send, irc_sock)){
 				cout<<">> Error communicating with server. Please try again."<<endl;
 			}
+		}
+		else if(!command.compare("/handshake")){
+			cin>>username;
+			send = "/handshake " + bob + " " + alice;
+			send_data(send, irc_sock);
 		}
 		else{
 			// Invalid command(s)

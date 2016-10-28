@@ -218,7 +218,32 @@ void* per_user(void* void_connfd){
 			catch(...){
 				send_data("Malformed message!", connfd);
 			}
-     	} 
+     	}
+     	else if(!command.compare("/negotiate") && logged_in){
+     		try{
+     			// Decrypt received packet using Kas
+     			pch = decrypt(pch,a_privatekey).c_str();
+     			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+     			string alice(pch);
+     			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+     			string bob(pch);
+     			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+     			string a_nonce(pch);
+     			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+     			string b_ticket(pch);
+     			// Decrypt b_ticket to extract B_nonce
+     			b_ticket = decrypt(b_ticket,b_privatekey);
+     			// Come up with Kas
+     			string b_retticket;
+     			b_retticket = encrpyt(Kab + " " + alice + " " + B_nonce, b_privatekey);
+     			string data = a_nonce + " " + Kab + " " + bob + " " + b_retticket;
+     			data = encrypt(data,a_privatekey);
+     			chat.push(make_pair(name_id[alice], "/negotiated_key " + data));
+     		}
+     		catch(...){
+     			send_data("Malformed message!", connfd);	
+     		}
+     	}
 	}
 }
 
