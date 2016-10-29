@@ -9,8 +9,8 @@
 #include <sys/sendfile.h>
 #include <arpa/inet.h> 
 
-#define REGISTER_PORT 5004 //Port for registrations
-#define IRC_PORT 5005 //Port for normal communication
+#define REGISTER_PORT 5009 //Port for registrations
+#define IRC_PORT 5010 //Port for normal communication
 #define BUFFER_SIZE 1024 //Maximum size per message
 #define USER_FILENAME "users" //Filename containing username & passwords
 
@@ -163,7 +163,9 @@ void* per_user(void* void_connfd){
 			try{
 				pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 				string username(pch);
-				if(logged_in){
+                pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+                string password(pch);
+				if(!username_password[username].compare(password)){
 					send_data("Signed in!", connfd);
 					// Update 1-1(effective) mapping of connectionID and username
                     current_username = username;
@@ -190,7 +192,7 @@ void* per_user(void* void_connfd){
      		try{
      			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 				string to(pch);
-				pch = strtok_r (NULL, "", &STRTOK_SHARED);
+				pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 				string data(pch);
 				if (!is_online(name_id[to])){
 					send_data("User is offline/doesn't exist!", connfd);
@@ -201,6 +203,46 @@ void* per_user(void* void_connfd){
 				send_data("Malformed message!", connfd);
 			}
      	}
+        else if(!command.compare("/handshake") && logged_in){
+            pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+            string to(pch);
+            pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+            string data(pch);
+            if (!is_online(name_id[to])){
+                send_data("User is offline/doesn't exist!", connfd);
+            }
+            data = command + " " + data;
+            chat.push(make_pair(name_id[to], data)); // Push outgoing message to queue
+        }
+        else if(!command.compare("/check_ticket") && logged_in){
+            pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+            string to(pch);
+            string data(STRTOK_SHARED);
+            if (!is_online(name_id[to])){
+                send_data("User is offline/doesn't exist!", connfd);
+            }
+            data = command + " " + id_name[connfd] + " " + data;
+            chat.push(make_pair(name_id[to], data)); // Push outgoing message to queue   
+        }
+        else if(!command.compare("/bob_receive") && logged_in){
+            pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+            string to(pch);
+            string data(STRTOK_SHARED);
+            if (!is_online(name_id[to])){
+                send_data("User is offline/doesn't exist!", connfd);
+            }
+            data = command + " " + id_name[connfd] + " " + data;
+            chat.push(make_pair(name_id[to], data)); // Push outgoing message to queue   
+        }
+        else if(!command.compare("/okay") && logged_in){
+            pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+            string to(pch);
+            if (!is_online(name_id[to])){
+                send_data("User is offline/doesn't exist!", connfd);
+            }
+            string data = command + " " + id_name[connfd];
+            chat.push(make_pair(name_id[to], data)); // Push outgoing message to queue   
+        }
      	else if(!command.compare("/negotiate") && logged_in){
      		try{
      			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
@@ -211,8 +253,7 @@ void* per_user(void* void_connfd){
      			string bob(pch);
      			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
      			string a_nonce(pch);
-     			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
-     			string b_ticket(pch);
+     			string b_ticket(STRTOK_SHARED);
      			// Decrypt b_ticket to extract B_nonce
      			b_ticket = decrypt(b_ticket, username_password[bob]);
      			char *dup = strdup(b_ticket.c_str());
