@@ -10,7 +10,7 @@
 #include <arpa/inet.h> 
 
 #define REGISTER_PORT 5009 //Port for registrations
-#define IRC_PORT 5010 //Port for normal communication
+#define KDC_PORT 5010 //Port for normal communication
 #define BUFFER_SIZE 1024 //Maximum size per message
 #define USER_FILENAME "users" //Filename containing username & passwords
 
@@ -159,14 +159,14 @@ void* per_user(void* void_connfd){
 		char *pch = strtok_r(buffer," ", &STRTOK_SHARED);
 		string command(pch);
 		logged_in = is_online(connfd);
-		if(!command.compare("/connect")){
+		if(!command.compare("/login")){
 			try{
 				pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 				string username(pch);
                 pch = strtok_r (NULL, " ", &STRTOK_SHARED);
                 string password(pch);
 				if(!username_password[username].compare(password)){
-					send_data("Signed in!", connfd);
+					send_data("Signed-in!", connfd);
 					// Update 1-1(effective) mapping of connectionID and username
                     current_username = username;
 					name_id[username] = connfd;
@@ -192,17 +192,20 @@ void* per_user(void* void_connfd){
      		try{
      			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 				string to(pch);
-				pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-				string data(pch);
-				if (!is_online(name_id[to])){
-					send_data("User is offline/doesn't exist!", connfd);
-				}
+                cout<<STRTOK_SHARED<<" GOT IT ;)\n";
+				string data(STRTOK_SHARED);
+                if (!is_online(name_id[to])){
+                    send_data("User is offline/doesn't exist!", connfd);
+                }
+                string msg("/msg");
+                data = "(" + id_name[connfd] + ") " + data;
 				chat.push(make_pair(name_id[to], data)); // Push outgoing message to queue
 			}
 			catch(...){
 				send_data("Malformed message!", connfd);
 			}
      	}
+        // else if((!command.compare("/handshake") || !command.compare("/msg")) && logged_in){
         else if(!command.compare("/handshake") && logged_in){
             pch = strtok_r (NULL, " ", &STRTOK_SHARED);
             string to(pch);
@@ -285,12 +288,7 @@ void* send_back(void* argv){
 		while(chat.size()){
 			x = chat.front();
 			chat.pop();
-			string formatted = x.second;
-			string msg("/msg");
-			if(!formatted.compare(0, msg.length(), msg)){
-				formatted = "(" + id_name[x.first] + ") " + x.second;
-			}
-			send_data(formatted, x.first);
+			send_data(x.second, x.first);
 		}	
 	}
 }
@@ -310,7 +308,7 @@ int main(){
     memset(&serv_addr, '0', sizeof(serv_addr)); 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    serv_addr.sin_port = htons(IRC_PORT); 
+    serv_addr.sin_port = htons(KDC_PORT); 
     bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)); 
     listen(listenfd, 15);
     while(1){

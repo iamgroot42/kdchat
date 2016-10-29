@@ -13,7 +13,7 @@
 #include <arpa/inet.h>
 
 #define REGISTER_PORT 5009 //Port for registrations
-#define IRC_PORT 5010 //Port for normal communication
+#define KDC_PORT 5010 //Port for normal communication
 #define BUFFER_SIZE 1024 //Maximum size per message
 
 using namespace std;
@@ -58,16 +58,9 @@ void* server_feedback(void* void_listenfd){
 			return 0;
 		}
 		buffer[ohho] = 0;
-		// Normal conversation; display on console
-		// cout<<buffer<<endl;
 		char *pch = strtok_r(buffer," ", &STRTOK_SHARED);
 		string command(pch);
-		if(!command.compare("/msg")){
-			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-			string message(pch);
-			cout<<">> "<<message<<endl;
-		}
-		else if(!command.compare("/handshake")){
+		if(!command.compare("/handshake")){
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string alice(pch);
 			srand(time(NULL));
@@ -143,6 +136,12 @@ void* server_feedback(void* void_listenfd){
 			// we can now start exchanging encrypted messages with bob
 			good_to_go.insert(bob);
 		}
+		else{
+			if(!strcmp("Signed-in!",buffer)){
+				logged_in = true;
+			}
+			cout<<">> "<<buffer<<endl;
+		}
 	}
 }
 
@@ -176,70 +175,74 @@ int main(int argc, char *argv[]){
 		return 0;
 	}
 	// Establish connection
-	long irc_sock,register_sock;
-	irc_sock = create_socket_and_connect(argv[1], IRC_PORT);
+	long kdc_sock,register_sock;
+	kdc_sock = create_socket_and_connect(argv[1], KDC_PORT);
 	register_sock = create_socket_and_connect(argv[1], REGISTER_PORT);
     // Create thread for receiving messages on irc socket
 	pthread_t pot;
-    pthread_create(&pot, NULL, server_feedback, (void*)irc_sock);
+    pthread_create(&pot, NULL, server_feedback, (void*)kdc_sock);
     // Create thread for receiving messages on register socket
 	pthread_t pot2;
     pthread_create(&pot2, NULL, server_feedback, (void*)register_sock);
 	string send, username, password, command;
 	cout<<">> Welcome to kdchat!"<<endl;
-	cout<<">> 1. Idenfity yourself\n>> 2. Register"<<endl;
-	int option;
-	// Log in/Register user
-	cin>>option;
-	if(option == 1){
-		cout<<">> Enter your username"<<endl;
-		cin>>my_username;
-		cout<<">> Enter your password"<<endl;
-		cin>>my_private_key;
-	}
-	else{
-		REGISTER_YOURSELF:
-		cin>>my_username;
-		cin>>my_private_key;
-		send = "/register " + my_username + " " + my_private_key;
-		if(!send_data(send, register_sock)){
-			cout<<">> Error in registration. Please try again."<<endl;
-			goto REGISTER_YOURSELF;
-		}
-	}
-	send = "/connect " + my_username + " " + my_private_key;
-	cout<<send_data(send, irc_sock)<<endl;
 	while(1){
 		// Kill main thread if server is down.
 		if(server_down){
 			return 0;
 		}
 		cin>>command;
-		cout<<command;
-		if(!command.compare("/exit")){
+		if(!command.compare("/register") ){
+			cin>>username;
+			cin>>password;
+			send = username + " " + password;
+			if(!send_data(send, register_sock)){
+				cout<<">> Error in registration. Please try again."<<endl;
+			}
+		}
+		else if(!command.compare("/login")){	
+			cin>>username;
+			cin>>password;
+			if(logged_in){
+				cout<<">> Already logged in!"<<endl;
+			}
+			else{
+				send = "/login " + username + " " + password;
+				if(!send_data(send, kdc_sock)){
+					cout<<">> Error logging-in. Please try again."<<endl;
+				}
+				else{
+					my_username = username;
+					my_private_key = password;
+				}
+			}
+		}
+		else if(!command.compare("/exit")){
 			// Communicate logout action to server
 			bool kill = true;
-			if(!send_data(command ,irc_sock)){
-				cout<<">> Error logging out. Please try again."<<endl;
-				kill = false;
+			if(logged_in){
+				if(!send_data(command ,kdc_sock)){
+					cout<<">> Error logging out. Please try again."<<endl;
+					kill = false;
+				}
 			}
 			if(kill){
 				// Kill thread listening for feedback
 				pthread_kill(pot,0);
-				close(irc_sock);
+				close(kdc_sock);
 				close(register_sock);
 				cout<<">> Exiting!\nThanks for using IRsea!"<<endl;
 				return 0;
 			}
 		}
-		else if(!command.compare("/who")){
-			if(!send_data(command, irc_sock)){
+		else if(!command.compare("/who") && logged_in){
+			if(!send_data(command, kdc_sock)){
 				cout<<">> Error communicating with server. Please try again."<<endl;
 			}
 		}
-		else if(!command.compare("/msg")){
+		else if(!command.compare("/msg") && logged_in){
 			cin>>username;
-			if(good_to_go.find(username) != good_to_go.end() && !shared_keys.count(username)){
+			if(good_to_go.find(username) != good_to_go.end() && shared_keys.count(username)){
 				getline(cin, password);
 				password = encrypt(password, shared_keys[username]);
 				send = command + " " + username + " " + password;
@@ -247,17 +250,22 @@ int main(int argc, char *argv[]){
 			else{
 				cout<<">> Shared key not negotiated. Please run /handshake."<<endl;
 			}
-			if(!send_data(send, irc_sock)){
+			if(!send_data(send, kdc_sock)){
 				cout<<">> Error communicating with server. Please try again."<<endl;
 			}
 		}
-		else if(!command.compare("/handshake")){
+		else if(!command.compare("/handshake") && logged_in){
 			cin>>username;
 			send = "/handshake " + username + " " + my_username;
-			send_data(send, irc_sock);
+			send_data(send, kdc_sock);
 		}
 		else{
-			cout<<">> Invalid command! Please read the README for the list of supported commands"<<endl;
+			if(!logged_in){
+				cout<<">> Not logged in. Please log in first!"<<endl;
+			}
+			else{
+				cout<<">> Invalid command! Please read the README for the list of supported commands"<<endl;
+			}
 		}
 	}
 	return 0;
