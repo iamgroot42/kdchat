@@ -22,7 +22,7 @@ bool server_down = false, logged_in = false;
 map<string,string> shared_keys;
 map<string, string> sent_nonce;
 set<string> good_to_go;
-string my_username, my_private_key, self_nonce;
+string my_username, my_private_key;
 
 // Send data via the given socket-fd
 int send_data(string data, int sock){
@@ -59,7 +59,7 @@ void* server_feedback(void* void_listenfd){
 		}
 		buffer[ohho] = 0;
 		// Normal conversation; display on console
-		cout<<buffer<<endl;
+		// cout<<buffer<<endl;
 		char *pch = strtok_r(buffer," ", &STRTOK_SHARED);
 		string command(pch);
 		if(!command.compare("/msg")){
@@ -99,8 +99,8 @@ void* server_feedback(void* void_listenfd){
 			string b_ticket(STRTOK_SHARED);
 			srand(time(NULL));
 			// A sends a request to KDC with A,B,nonceA and above packet
-			self_nonce = to_string(long(rand()));
-			string send = "/negotiate " +  my_username + " " + bob + " " + self_nonce + " " + b_ticket;
+			sent_nonce[bob] = to_string(long(rand()));
+			string send = "/negotiate " +  my_username + " " + bob + " " + sent_nonce[bob] + " " + b_ticket;
 			send_data(send, listenfd);	
 		}
 		else if(!command.compare("/negotiated_key")){
@@ -108,12 +108,12 @@ void* server_feedback(void* void_listenfd){
 			char *dup = strdup(decrypt(decr_this, my_private_key).c_str());
 			pch = strtok_r (dup, " ", &STRTOK_SHARED);
 			string nonce_a(pch);
-			//Verify that nonce is same
-			assert(!self_nonce.compare(nonce_a));
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string k_ab(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string bob(pch);
+			//Verify that nonce is same
+			assert(!sent_nonce[bob].compare(nonce_a));
 			// Set shared key for future communication
 			shared_keys[bob] = k_ab;
 			string bob_confirmticket(STRTOK_SHARED);
@@ -122,17 +122,19 @@ void* server_feedback(void* void_listenfd){
 			send_data(send, listenfd);
 		}
 		else if(!command.compare("/bob_receive")){
-			char *dup = strdup(decrypt(pch, my_private_key).c_str());
+			string decryp(STRTOK_SHARED);
+			char *dup = strdup(decrypt(decryp, my_private_key).c_str());
 			pch = strtok_r (dup, " ", &STRTOK_SHARED);
 			string k_ab(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string alice(pch);
 			// Set shared key for future communication
 			shared_keys[alice] = k_ab;
+			good_to_go.insert(alice);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string b_nonce(pch);
 			// Check that bnonce hasn't been tampered with
-			assert(!b_nonce.compare(self_nonce));
+			assert(!b_nonce.compare(sent_nonce[alice]));
 			send_data("/okay " + alice, listenfd);
 		}
 		else if(!command.compare("/okay")){

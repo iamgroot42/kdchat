@@ -231,7 +231,7 @@ void* per_user(void* void_connfd){
             if (!is_online(name_id[to])){
                 send_data("User is offline/doesn't exist!", connfd);
             }
-            data = command + " " + id_name[connfd] + " " + data;
+            data = command + " " + data;
             chat.push(make_pair(name_id[to], data)); // Push outgoing message to queue   
         }
         else if(!command.compare("/okay") && logged_in){
