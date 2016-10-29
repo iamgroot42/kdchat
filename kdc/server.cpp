@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <sys/sendfile.h>
 #include <arpa/inet.h> 
+#include <openssl/evp.h>
 
 #define REGISTER_PORT 5009 //Port for registrations
 #define KDC_PORT 5010 //Port for normal communication
@@ -37,6 +38,17 @@ int send_data(string data, int sock)
     return 1;
 }
 
+string random_string(int length){
+    static const char alphanum[] ="0123456789!@#$^&*ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    int stringLength = sizeof(alphanum) - 1;
+    srand(time(NULL));
+    string rand_str("");
+    for(int i = 0; i < length; ++i){
+        rand_str = rand_str + alphanum[rand() % stringLength];
+    }
+    return rand_str;
+}
+
 // Read registered accounts from file
 void populate_userlist(){
 	fstream file(USER_FILENAME, ios::in);
@@ -57,18 +69,45 @@ void populate_userlist(){
   	}
 }
 
-string encrypt(string data, string key){
-	return data;
+string encrypt(string data, string pass_key, string init_vector){
+    unsigned char *plaintext, *key, *iv;
+    plaintext = (unsigned char*)data.c_str();
+    key = (unsigned char*)pass_key.c_str();
+    iv = (unsigned char*)init_vector.c_str();
+    unsigned char* ciphertext;
+    EVP_CIPHER_CTX *ctx;
+    int len, ciphertext_len, plaintext_len;
+    plaintext_len = data.length();
+    ctx = EVP_CIPHER_CTX_new();
+    EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
+    EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, plaintext_len);
+    ciphertext_len = len;
+    EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
+    ciphertext_len += len;
+    EVP_CIPHER_CTX_free(ctx);
+    string encrypted_text((const char*)ciphertext);
+    return encrypted_text;
 }
 
-string decrypt(string data, string key){
-	return data;
+string decrypt(string data, string pass_key, string init_vector){
+    unsigned char *plaintext, *ciphertext, *key, *iv;
+    plaintext = (unsigned char*)data.c_str();
+    key = (unsigned char*)pass_key.c_str();
+    iv = (unsigned char*)init_vector.c_str();
+    EVP_CIPHER_CTX *ctx;
+    int len, plaintext_len, ciphertext_len;
+    ciphertext_len = data.length();
+    ctx = EVP_CIPHER_CTX_new();
+    EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
+    EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len);
+    plaintext_len = len;
+    EVP_DecryptFinal_ex(ctx, plaintext + len, &len);
+    plaintext_len += len;
+    EVP_CIPHER_CTX_free(ctx);
+    string decrypted_text((const char*)plaintext);
+    return decrypted_text;
 }
 
-// Create a shared-key for Alice and Bob
-string mutual_key(string alice, string bob){
-	return username_password[alice] + "ohho" + username_password[bob];
-}
 
 // Thread to listen to register users
 void* register_user(void* argv){
@@ -198,7 +237,7 @@ void* per_user(void* void_connfd){
                     send_data("User is offline/doesn't exist!", connfd);
                 }
                 string msg("/msg");
-                data = "(" + id_name[connfd] + ") " + data;
+                data = "/msg " + id_name[connfd] + " " + data;
 				chat.push(make_pair(name_id[to], data)); // Push outgoing message to queue
 			}
 			catch(...){
@@ -256,9 +295,11 @@ void* per_user(void* void_connfd){
      			string bob(pch);
      			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
      			string a_nonce(pch);
+                pch = strtok_r(NULL, " ", &STRTOK_SHARED);
+                string iv(pch);
      			string b_ticket(STRTOK_SHARED);
      			// Decrypt b_ticket to extract B_nonce
-     			b_ticket = decrypt(b_ticket, username_password[bob]);
+     			b_ticket = decrypt(b_ticket, username_password[bob], iv);
      			char *dup = strdup(b_ticket.c_str());
      			char *temp = strtok_r(dup," ", &STRTOK_SHARED);
      			string should_be_alice(temp);
@@ -267,12 +308,15 @@ void* per_user(void* void_connfd){
      			string b_nonce(strtok_r(NULL," ", &STRTOK_SHARED));
      			// Come up with Kab	
      			string b_retticket, Kab;
-     			Kab = mutual_key(alice, bob);
+     			Kab = random_string(16);
      			b_retticket = Kab + " " + alice + " " + b_nonce;
-     			b_retticket = encrypt(b_retticket, username_password[bob]);
-     			string data = a_nonce + " " + Kab + " " + bob + " " + b_retticket;
-     			data = encrypt(data, username_password[alice]);
-     			chat.push(make_pair(name_id[alice], "/negotiated_key " + data));
+                string iv_a,iv_b;
+                iv_a = random_string(16);
+                iv_b = random_string(16);
+     			b_retticket = encrypt(b_retticket, username_password[bob], iv_b);
+     			string data = a_nonce + " " + Kab + " " + bob + " " + iv_b + " " + b_retticket;
+     			data = encrypt(data, username_password[alice], iv_a);
+     			chat.push(make_pair(name_id[alice], "/negotiated_key " + iv_a + " " + data));
      		}
      		catch(...){
      			send_data("Malformed message!", connfd);	

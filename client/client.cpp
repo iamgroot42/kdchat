@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <openssl/evp.h>
 
 #define REGISTER_PORT 5009 //Port for registrations
 #define KDC_PORT 5010 //Port for normal communication
@@ -33,12 +34,54 @@ int send_data(string data, int sock){
     return 1;
 }
 
-string encrypt(string data, string key){
-	return data;
+string random_string(int length){
+    static const char alphanum[] ="0123456789!@#$^&*ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    int stringLength = sizeof(alphanum) - 1;
+    srand(time(NULL));
+    string rand_str("");
+    for(int i = 0; i < length; ++i){
+        rand_str = rand_str + alphanum[rand() % stringLength];
+    }
+    return rand_str;
 }
 
-string decrypt(string data, string key){
-	return data;
+string encrypt(string data, string pass_key, string init_vector){
+	unsigned char *plaintext, *key, *iv;
+	plaintext = (unsigned char*)data.c_str();
+	key = (unsigned char*)pass_key.c_str();
+	iv = (unsigned char*)init_vector.c_str();
+	unsigned char* ciphertext;
+	EVP_CIPHER_CTX *ctx;
+	int len, ciphertext_len, plaintext_len;
+	plaintext_len = data.length();
+	ctx = EVP_CIPHER_CTX_new();
+	EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
+	EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, plaintext_len);
+	ciphertext_len = len;
+	EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
+	ciphertext_len += len;
+	EVP_CIPHER_CTX_free(ctx);
+	string encrypted_text((const char*)ciphertext);
+	return encrypted_text;
+}
+
+string decrypt(string data, string pass_key, string init_vector){
+	unsigned char *plaintext, *ciphertext, *key, *iv;
+	plaintext = (unsigned char*)data.c_str();
+	key = (unsigned char*)pass_key.c_str();
+	iv = (unsigned char*)init_vector.c_str();
+	EVP_CIPHER_CTX *ctx;
+	int len, plaintext_len, ciphertext_len;
+	ciphertext_len = data.length();
+	ctx = EVP_CIPHER_CTX_new();
+	EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
+	EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len);
+  	plaintext_len = len;
+  	EVP_DecryptFinal_ex(ctx, plaintext + len, &len);
+  	plaintext_len += len;
+  	EVP_CIPHER_CTX_free(ctx);
+  	string decrypted_text((const char*)plaintext);
+	return decrypted_text;
 }
 
 // Thread to read incoming data (from server)
@@ -66,39 +109,30 @@ void* server_feedback(void* void_listenfd){
 			srand(time(NULL));
 			long nonce_B = long(rand());
 			sent_nonce[alice] = to_string(nonce_B);
-			string encrypted_packet = encrypt(alice + " " + to_string(nonce_B), my_private_key);
+			string iv = random_string(16);
+			string encrypted_packet = encrypt(alice + " " + to_string(nonce_B), my_private_key, iv);
 			// Generate a nonce and return it with A, encrypted with Kbs
-			string ret_ticket = "/check_ticket " + alice + " " +  encrypted_packet;
+			string ret_ticket = "/check_ticket " + alice + " " + iv + " " + encrypted_packet;
 			send_data(ret_ticket, listenfd);
-		}
-		else if(!command.compare("/receive_key")){
-			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-			string data(pch);
-			data = decrypt(data, my_private_key);
-			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-			string shared_key(pch);
-			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-			string A(pch);
-			// Assert that this is the same user as the one from which I received this packet
-			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-			string nonceB(pch);
-			// Assert that this nonce is the same as the one I sent
-			// Set global flag indicating successful NS exchange
 		}
 		else if(!command.compare("/check_ticket")){
 			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
 			string bob(pch);
+			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
+			string iv(pch);
 			// Extract b_ticket
 			string b_ticket(STRTOK_SHARED);
 			srand(time(NULL));
 			// A sends a request to KDC with A,B,nonceA and above packet
 			sent_nonce[bob] = to_string(long(rand()));
-			string send = "/negotiate " +  my_username + " " + bob + " " + sent_nonce[bob] + " " + b_ticket;
+			string send = "/negotiate " +  my_username + " " + bob + " " + sent_nonce[bob] + " " + iv + " " + b_ticket;
 			send_data(send, listenfd);	
 		}
 		else if(!command.compare("/negotiated_key")){
+			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
+			string iv_a(pch);
 			string decr_this(STRTOK_SHARED);
-			char *dup = strdup(decrypt(decr_this, my_private_key).c_str());
+			char *dup = strdup(decrypt(decr_this, my_private_key, iv_a).c_str());
 			pch = strtok_r (dup, " ", &STRTOK_SHARED);
 			string nonce_a(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
@@ -115,8 +149,10 @@ void* server_feedback(void* void_listenfd){
 			send_data(send, listenfd);
 		}
 		else if(!command.compare("/bob_receive")){
+			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
+			string iv_b(pch);
 			string decryp(STRTOK_SHARED);
-			char *dup = strdup(decrypt(decryp, my_private_key).c_str());
+			char *dup = strdup(decrypt(decryp, my_private_key, iv_b).c_str());
 			pch = strtok_r (dup, " ", &STRTOK_SHARED);
 			string k_ab(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
@@ -135,6 +171,16 @@ void* server_feedback(void* void_listenfd){
 			string bob(pch);
 			// we can now start exchanging encrypted messages with bob
 			good_to_go.insert(bob);
+		}
+		else if(!command.compare("/msg")){
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string bob(pch);
+			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
+			string iv(pch);
+			string data(STRTOK_SHARED);
+			string message = decrypt(data, shared_keys[bob], iv);
+			string printout = "(" + bob + ") " + message;
+			cout<<">> "<<printout<<endl;
 		}
 		else{
 			if(!strcmp("Signed-in!",buffer)){
@@ -195,7 +241,11 @@ int main(int argc, char *argv[]){
 		if(!command.compare("/register") ){
 			cin>>username;
 			cin>>password;
-			send = username + " " + password;
+			unsigned char* hashed;
+			// Calculate hash of password
+			PKCS5_PBKDF2_HMAC_SHA1(password.c_str(),-1,NULL,0,10,1024,hashed);
+			string hashed_password((const char*)hashed);
+			send = username + " " + hashed_password;
 			if(!send_data(send, register_sock)){
 				cout<<">> Error in registration. Please try again."<<endl;
 			}
@@ -203,17 +253,21 @@ int main(int argc, char *argv[]){
 		else if(!command.compare("/login")){	
 			cin>>username;
 			cin>>password;
+			unsigned char* hashed;
+			// Calculate hash of password
+			PKCS5_PBKDF2_HMAC_SHA1(password.c_str(),-1,NULL,0,10,1024,hashed);
+			string hashed_password((const char*)hashed);
 			if(logged_in){
 				cout<<">> Already logged in!"<<endl;
 			}
 			else{
-				send = "/login " + username + " " + password;
+				send = "/login " + username + " " + hashed_password;
 				if(!send_data(send, kdc_sock)){
 					cout<<">> Error logging-in. Please try again."<<endl;
 				}
 				else{
 					my_username = username;
-					my_private_key = password;
+					my_private_key = hashed_password;
 				}
 			}
 		}
@@ -244,8 +298,9 @@ int main(int argc, char *argv[]){
 			cin>>username;
 			if(good_to_go.find(username) != good_to_go.end() && shared_keys.count(username)){
 				getline(cin, password);
-				password = encrypt(password, shared_keys[username]);
-				send = command + " " + username + " " + password;
+				string iv = random_string(16);
+				password = encrypt(password, shared_keys[username], iv);
+				send = command + " " + username + " " + iv + " " + password;
 			}
 			else{
 				cout<<">> Shared key not negotiated. Please run /handshake."<<endl;
