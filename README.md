@@ -6,9 +6,11 @@ A chat server to allow exchange of message between two parties, with authenticat
 The following commands are supported :
 
 * `/register <USERNAME> <PASSWORD>` : register yourself with the server
-* `/exit` : log out and exit from the service
+* `/login <USERNAME> <PASSWORD>` : register yourself with the server
 * `/who` : see all the users who're logged in right now
+* `/exit` : log out and exit from the service
 * `/msg <USERNAME> <MESSAGE>` : send a message to a specific user
+* `/handshake <USERNAME>` : negotiate a common encryption key with the KDC
 
 ## Working
 
@@ -33,9 +35,8 @@ The following commands are supported :
 
 
 ## Specifics
-* Default user (hello,world) for testing.
-* Mutex locks are inserted around every shared variable to ensure concurrency.
-* Maximum length per message: 512 characters.
+* Default users (hello,world) & (test,user) for testing.
+* Maximum length per message (before encryption): 1024 characters.
 * strtok() is not thread safe (as standard implementation doesn't use TLS). Thus, strtok_r() has been used.
 * 'User is offline/doesn't exist' is flashed to the client if they try messaging a user who is offline or doesn't exist (further specification isn't provided to avoid any secutiry attacks).
 

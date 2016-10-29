@@ -1,7 +1,7 @@
 # iamgroot42
 
 all: server.cpp
-	g++ -pthread -lcrypto -std=c++11 server.cpp -o server
+	g++ -pthread -std=c++11 server.cpp -o server -lcrypto
 	@echo Compiled!
 
 clean:

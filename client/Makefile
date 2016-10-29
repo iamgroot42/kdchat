@@ -1,7 +1,7 @@
 # iamgroot42
 
 all: client.cpp
-	g++ -pthread -lcrypto -std=c++11 client.cpp -o client
+	g++ -pthread -std=c++11 client.cpp -o client -lcrypto
 	@echo Compiled!
 
 clean:

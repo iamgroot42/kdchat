@@ -241,9 +241,9 @@ int main(int argc, char *argv[]){
 		if(!command.compare("/register") ){
 			cin>>username;
 			cin>>password;
-			unsigned char* hashed;
+			unsigned char hashed[128];
 			// Calculate hash of password
-			PKCS5_PBKDF2_HMAC_SHA1(password.c_str(),-1,NULL,0,10,1024,hashed);
+			PKCS5_PBKDF2_HMAC(password.c_str(),-1,NULL,0,128,EVP_sha256(),5,hashed);
 			string hashed_password((const char*)hashed);
 			send = username + " " + hashed_password;
 			if(!send_data(send, register_sock)){
@@ -253,9 +253,9 @@ int main(int argc, char *argv[]){
 		else if(!command.compare("/login")){	
 			cin>>username;
 			cin>>password;
-			unsigned char* hashed;
+			unsigned char hashed[128];
 			// Calculate hash of password
-			PKCS5_PBKDF2_HMAC_SHA1(password.c_str(),-1,NULL,0,10,1024,hashed);
+			PKCS5_PBKDF2_HMAC(password.c_str(),-1,NULL,0,128,EVP_sha256(),5,hashed);
 			string hashed_password((const char*)hashed);
 			if(logged_in){
 				cout<<">> Already logged in!"<<endl;

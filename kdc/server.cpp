@@ -58,8 +58,7 @@ void populate_userlist(){
 	    while(getline(file,line)){
       		char* pch = strtok_r(strdup(line.c_str()), " ", &STRTOK_SHARED);
       		string username(pch);
-      		pch = strtok_r(NULL, " ", &STRTOK_SHARED);
-      		string password(pch);
+      		string password(STRTOK_SHARED);
       		username_password[username] = password;
     	}
     	file.close();
@@ -308,7 +307,7 @@ void* per_user(void* void_connfd){
      			string b_nonce(strtok_r(NULL," ", &STRTOK_SHARED));
      			// Come up with Kab	
      			string b_retticket, Kab;
-     			Kab = random_string(16);
+     			Kab = random_string(32);
      			b_retticket = Kab + " " + alice + " " + b_nonce;
                 string iv_a,iv_b;
                 iv_a = random_string(16);
