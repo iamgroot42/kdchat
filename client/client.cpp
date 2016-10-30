@@ -11,7 +11,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <openssl/conf.h>
 #include <openssl/evp.h>
+#include <openssl/err.h>
+#include "aes.cpp"
 
 #define REGISTER_PORT 5009 //Port for registrations
 #define KDC_PORT 5010 //Port for normal communication
@@ -45,48 +48,14 @@ string random_string(int length){
     return rand_str;
 }
 
-string encrypt(string data, string pass_key, string init_vector){
-	unsigned char *plaintext, *key, *iv;
-	plaintext = (unsigned char*)data.c_str();
-	key = (unsigned char*)pass_key.c_str();
-	iv = (unsigned char*)init_vector.c_str();
-	unsigned char ciphertext[data.length() * 8];
-	EVP_CIPHER_CTX *ctx;
-	int len, ciphertext_len, plaintext_len;
-	plaintext_len = data.length();
-	ctx = EVP_CIPHER_CTX_new();
-	EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
-	EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, plaintext_len);
-	ciphertext_len = len;
-	EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
-	ciphertext_len += len;
-	EVP_CIPHER_CTX_free(ctx);
-	string encrypted_text((const char*)ciphertext);
-	return encrypted_text;
-}
-
-string decrypt(string data, string pass_key, string init_vector){
-	unsigned char  *ciphertext, *key, *iv;
-	unsigned char plaintext[data.length() * 1];
-	ciphertext = (unsigned char*)data.c_str();
-	key = (unsigned char*)pass_key.c_str();
-	iv = (unsigned char*)init_vector.c_str();
-	EVP_CIPHER_CTX *ctx;
-	int len, plaintext_len, ciphertext_len;
-	ciphertext_len = data.length();
-	ctx = EVP_CIPHER_CTX_new();
-	EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
-	EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len);
-  	plaintext_len = len;
-  	EVP_DecryptFinal_ex(ctx, plaintext + len, &len);
-  	plaintext_len += len;
-  	EVP_CIPHER_CTX_free(ctx);
-  	string decrypted_text((const char*)plaintext);
-	return decrypted_text;
-}
-
 // Thread to read incoming data (from server)
 void* server_feedback(void* void_listenfd){
+	// OpenSSL stuff {
+  	ERR_load_crypto_strings();
+  	OpenSSL_add_all_algorithms();
+  	OPENSSL_config(NULL);
+  	EVP_add_cipher(EVP_aes_256_cbc());
+  	// OpenSSL stuff }
 	long listenfd = (long)void_listenfd;
 	char buffer[BUFFER_SIZE];
 	char* STRTOK_SHARED;
@@ -111,7 +80,13 @@ void* server_feedback(void* void_listenfd){
 			long nonce_B = long(rand());
 			sent_nonce[alice] = to_string(nonce_B);
 			string iv = random_string(16);
-			string encrypted_packet = encrypt(alice + " " + to_string(nonce_B), my_private_key, iv);
+			// AES stuff {
+           	custom_string kee = my_private_key.c_str(),ivee = iv.c_str();
+           	byte *keye, *IV;
+           	keye = (unsigned char*)kee.c_str();
+           	IV = (unsigned char*)ivee.c_str();
+           	// AES stuff }
+			string encrypted_packet = encrypt(alice + " " + to_string(nonce_B), keye, IV);
 			// Generate a nonce and return it with A, encrypted with Kbs
 			string ret_ticket = "/check_ticket " + alice + " " + iv + " " + encrypted_packet;
 			send_data(ret_ticket, listenfd);
@@ -133,7 +108,13 @@ void* server_feedback(void* void_listenfd){
 			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
 			string iv_a(pch);
 			string decr_this(STRTOK_SHARED);
-			char *dup = strdup(decrypt(decr_this, my_private_key, iv_a).c_str());
+			// AES stuff {
+           	custom_string kee = my_private_key.c_str(),ivee = iv_a.c_str();
+           	byte *keye, *IV;
+           	keye = (unsigned char*)kee.c_str();
+           	IV = (unsigned char*)ivee.c_str();
+           	// AES stuff }
+			char *dup = strdup(decrypt(decr_this, keye, IV).c_str());
 			pch = strtok_r (dup, " ", &STRTOK_SHARED);
 			string nonce_a(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
@@ -153,7 +134,13 @@ void* server_feedback(void* void_listenfd){
 			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
 			string iv_b(pch);
 			string decryp(STRTOK_SHARED);
-			char *dup = strdup(decrypt(decryp, my_private_key, iv_b).c_str());
+			// AES stuff {
+           	custom_string kee = my_private_key.c_str(),ivee = iv_b.c_str();
+           	byte *keye, *IV;
+           	keye = (unsigned char*)kee.c_str();
+           	IV = (unsigned char*)ivee.c_str();
+           	// AES stuff }
+			char *dup = strdup(decrypt(decryp, keye, IV).c_str());
 			pch = strtok_r (dup, " ", &STRTOK_SHARED);
 			string k_ab(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
@@ -179,7 +166,13 @@ void* server_feedback(void* void_listenfd){
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string iv(pch);
 			string data(STRTOK_SHARED);
-			string message = decrypt(data, shared_keys[bob], iv);
+			// AES stuff {
+           	custom_string kee = shared_keys[bob].c_str(),ivee = iv.c_str();
+           	byte *keye, *IV;
+           	keye = (unsigned char*)kee.c_str();
+           	IV = (unsigned char*)ivee.c_str();
+           	// AES stuff }
+			string message = decrypt(data, keye, IV);
 			string printout = "(" + bob + ") " + message;
 			cout<<">> "<<printout<<endl;
 		}
@@ -221,6 +214,12 @@ int main(int argc, char *argv[]){
 		cout<<"Usage: "<<argv[0]<<" <server ip>"<<endl;
 		return 0;
 	}
+	// OpenSSL stuff {
+  	ERR_load_crypto_strings();
+  	OpenSSL_add_all_algorithms();
+  	OPENSSL_config(NULL);
+  	EVP_add_cipher(EVP_aes_256_cbc());
+  	// OpenSSL stuff }
 	// Establish connection
 	long kdc_sock,register_sock;
 	kdc_sock = create_socket_and_connect(argv[1], KDC_PORT);
@@ -300,7 +299,13 @@ int main(int argc, char *argv[]){
 			if(good_to_go.find(username) != good_to_go.end() && shared_keys.count(username)){
 				getline(cin, password);
 				string iv = random_string(16);
-				password = encrypt(password, shared_keys[username], iv);
+				// AES stuff {
+           		custom_string kee = shared_keys[username].c_str(),ivee = iv.c_str();
+           		byte *keye, *IV;
+           		keye = (unsigned char*)kee.c_str();
+           		IV = (unsigned char*)ivee.c_str();
+           		// AES stuff }
+				password = encrypt(password, keye, IV);
 				send = command + " " + username + " " + iv + " " + password;
 			}
 			else{
