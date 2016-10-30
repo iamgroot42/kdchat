@@ -50,7 +50,7 @@ string encrypt(string data, string pass_key, string init_vector){
 	plaintext = (unsigned char*)data.c_str();
 	key = (unsigned char*)pass_key.c_str();
 	iv = (unsigned char*)init_vector.c_str();
-	unsigned char* ciphertext;
+	unsigned char ciphertext[data.length() * 8];
 	EVP_CIPHER_CTX *ctx;
 	int len, ciphertext_len, plaintext_len;
 	plaintext_len = data.length();
@@ -66,8 +66,9 @@ string encrypt(string data, string pass_key, string init_vector){
 }
 
 string decrypt(string data, string pass_key, string init_vector){
-	unsigned char *plaintext, *ciphertext, *key, *iv;
-	plaintext = (unsigned char*)data.c_str();
+	unsigned char  *ciphertext, *key, *iv;
+	unsigned char plaintext[data.length() * 1];
+	ciphertext = (unsigned char*)data.c_str();
 	key = (unsigned char*)pass_key.c_str();
 	iv = (unsigned char*)init_vector.c_str();
 	EVP_CIPHER_CTX *ctx;

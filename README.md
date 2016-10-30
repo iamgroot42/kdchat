@@ -42,7 +42,11 @@ The following commands are supported :
 
 
 ## Cases tested (& handled)
-
+* A chatting with B (after negotiation of shared key).
+* A trying to chat with B, when they haven't exchanged keys.
+* MITM listening to all conversations (including negotiation of keys) : cannot decrypt them.
+* MITM tampering with messages : detected at the recipient's end.
+* A user chatting with more than one user at the same tie (different keys are usied for different pairs of (A,B) communication).
 
 
 ### Example (for client)
