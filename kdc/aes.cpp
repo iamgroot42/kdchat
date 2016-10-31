@@ -72,7 +72,7 @@ typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > custo
 using EVP_CIPHER_CTX_free_ptr = std::unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHER_CTX_free)>;
 
 
-std::string encrypt(std::string data, const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE])
+std::string aes_encrypt(std::string data, const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE])
 {
     const custom_string ptext = data.c_str();
     custom_string ctext;
@@ -88,7 +88,7 @@ std::string encrypt(std::string data, const byte key[KEY_SIZE], const byte iv[BL
     return ohho;
 }
 
-std::string decrypt(std::string data, const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE])
+std::string aes_decrypt(std::string data, const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE])
 {
     custom_string rtext, ctext = data.c_str();
     std::cout<<ctext<<"\n";
@@ -104,4 +104,14 @@ std::string decrypt(std::string data, const byte key[KEY_SIZE], const byte iv[BL
     rtext.resize(out_len1 + out_len2);
     std::string ohho(rtext.c_str());
     return ohho;
+}
+
+std::string encrypt(std::string data, const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE])
+{
+   return data;
+}
+
+std::string decrypt(std::string data, const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE])
+{
+    return data;
 }

@@ -85,8 +85,8 @@ void* server_feedback(void* void_listenfd){
            	byte *keye, *IV;
            	keye = (unsigned char*)kee.c_str();
            	IV = (unsigned char*)ivee.c_str();
-           	// AES stuff }
 			string encrypted_packet = encrypt(alice + " " + to_string(nonce_B), keye, IV);
+           	// AES stuff }
 			// Generate a nonce and return it with A, encrypted with Kbs
 			string ret_ticket = "/check_ticket " + alice + " " + iv + " " + encrypted_packet;
 			send_data(ret_ticket, listenfd);
@@ -113,8 +113,8 @@ void* server_feedback(void* void_listenfd){
            	byte *keye, *IV;
            	keye = (unsigned char*)kee.c_str();
            	IV = (unsigned char*)ivee.c_str();
-           	// AES stuff }
 			char *dup = strdup(decrypt(decr_this, keye, IV).c_str());
+           	// AES stuff }
 			pch = strtok_r (dup, " ", &STRTOK_SHARED);
 			string nonce_a(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
@@ -173,8 +173,19 @@ void* server_feedback(void* void_listenfd){
            	IV = (unsigned char*)ivee.c_str();
            	// AES stuff }
 			string message = decrypt(data, keye, IV);
-			string printout = "(" + bob + ") " + message;
-			cout<<">> "<<printout<<endl;
+			char *dup = strdup(message.c_str());
+			char* pch2 = strtok_r (dup, " ", &STRTOK_SHARED);
+			string enc_len(pch2);
+			string real_message(STRTOK_SHARED);
+			// Check if message has been tampered or not
+			if(!enc_len.compare(to_string(real_message.length()))){
+				string printout = "(" + bob + ") " + real_message;
+				cout<<">> "<<printout<<endl;	
+			}
+			else{
+				cout<<">> Tampered message received!"<<endl;
+			}
+			
 		}
 		else{
 			if(!strcmp("Signed-in!",buffer)){
@@ -243,9 +254,10 @@ int main(int argc, char *argv[]){
 			cin>>password;
 			unsigned char hashed[128];
 			// Calculate hash of password
-			PKCS5_PBKDF2_HMAC(password.c_str(),-1,NULL,0,128,EVP_sha256(),5,hashed);
-			string hashed_password((const char*)hashed);
-			send = username + " " + hashed_password;
+			// PKCS5_PBKDF2_HMAC(password.c_str(),-1,NULL,0,128,EVP_sha256(),5,hashed);
+			// string hashed_password((const char*)hashed);
+			// send = username + " " + hashed_password;
+			send = username + " " + password;
 			if(!send_data(send, register_sock)){
 				cout<<">> Error in registration. Please try again."<<endl;
 			}
@@ -255,19 +267,21 @@ int main(int argc, char *argv[]){
 			cin>>password;
 			unsigned char hashed[128];
 			// Calculate hash of password
-			PKCS5_PBKDF2_HMAC(password.c_str(),-1,NULL,0,128,EVP_sha256(),5,hashed);
-			string hashed_password((const char*)hashed);
+			// PKCS5_PBKDF2_HMAC(password.c_str(),-1,NULL,0,128,EVP_sha256(),5,hashed);
+			// string hashed_password((const char*)hashed);
 			if(logged_in){
 				cout<<">> Already logged in!"<<endl;
 			}
 			else{
-				send = "/login " + username + " " + hashed_password;
+				// send = "/login " + username + " " + hashed_password;
+				send = "/login " + username + " " + password;
 				if(!send_data(send, kdc_sock)){
 					cout<<">> Error logging-in. Please try again."<<endl;
 				}
 				else{
 					my_username = username;
-					my_private_key = hashed_password;
+					// my_private_key = hashed_password;
+					my_private_key = password;
 				}
 			}
 		}
@@ -305,6 +319,7 @@ int main(int argc, char *argv[]){
            		keye = (unsigned char*)kee.c_str();
            		IV = (unsigned char*)ivee.c_str();
            		// AES stuff }
+           		password = to_string(password.length()) + " " + password;
 				password = encrypt(password, keye, IV);
 				send = command + " " + username + " " + iv + " " + password;
 			}

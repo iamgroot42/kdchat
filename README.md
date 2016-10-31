@@ -46,11 +46,14 @@ The following commands are supported :
 * A trying to chat with B, when they haven't exchanged keys.
 * MITM listening to all conversations (including negotiation of keys) : cannot decrypt them.
 * MITM tampering with messages : detected at the recipient's end.
-* A user chatting with more than one user at the same tie (different keys are usied for different pairs of (A,B) communication).
+* A user chatting with more than one user at the same time (different keys are used for different pairs of (A,B) communication).
 
 
 ### Example (for client)
 ```
-
-
+>> Welcome to kdchat!
+/login test user
+/handshake hello
+/msg hello what's up?
+>> (hello) munch. you?
 ```
