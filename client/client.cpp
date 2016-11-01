@@ -11,16 +11,62 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <openssl/conf.h>
-#include <openssl/evp.h>
-#include <openssl/err.h>
-#include "aes.cpp"
+#include <mcrypt.h>
 
 #define REGISTER_PORT 5009 //Port for registrations
 #define KDC_PORT 5010 //Port for normal communication
 #define BUFFER_SIZE 1024 //Maximum size per message
+#define CHALLENGE "potato"
+#define HARDCODED_IV "0123456789123456"
+
+// Reference for enc/dec : https://gist.github.com/bricef/2436364
 
 using namespace std;
+
+string encrypt(string data, string keye, string IVe){
+    int buffer_len = 16;
+    int mbl = buffer_len*((data.length()/buffer_len) + 1);
+    char* bass = (char*)calloc(1, mbl);
+    strncpy(bass, data.c_str(), data.length());
+    char *IV = strdup(IVe.c_str()), *key = strdup(keye.c_str());
+    int key_len = keye.length();
+    string output = "";
+    for(int i=0; i < mbl; i += buffer_len){
+        char* bufferr = (char*)calloc(1, buffer_len);
+        memcpy(bufferr, bass+i, buffer_len);
+        void* buffer = (void*)bufferr;
+        MCRYPT td = mcrypt_module_open("rijndael-128", NULL, "cbc", NULL);
+        mcrypt_generic_init(td, key, key_len, IV);
+        mcrypt_generic(td, buffer, buffer_len);
+        mcrypt_generic_deinit(td);
+        mcrypt_module_close(td);
+        output = output + (char*)buffer;
+    }
+    return output;
+}
+
+string decrypt(string data, string keye, string IVe){ 
+    int buffer_len = 16;
+    int mbl = data.length();
+    char* bass = (char*)calloc(1, mbl);
+    strncpy(bass, data.c_str(), data.length());
+    char *IV = strdup(IVe.c_str()), *key = strdup(keye.c_str());
+    int key_len = keye.length();
+    string output = "";
+    for(int i=0; i < mbl; i += buffer_len){
+        char* bufferr = (char*)calloc(1, buffer_len);
+        memcpy(bufferr, bass+i, buffer_len);
+        void* buffer = (void*)bufferr;
+        MCRYPT td = mcrypt_module_open("rijndael-128", NULL, "cbc", NULL);
+        mcrypt_generic_init(td, key, key_len, IV);
+        mdecrypt_generic(td, buffer, buffer_len);
+        mcrypt_generic_deinit(td);
+        mcrypt_module_close(td);
+        output = output + (char*)buffer;
+    }
+    return output;
+}
+
 // Indicator variables for status of server connection, login status
 bool server_down = false, logged_in = false;
 map<string,string> shared_keys;
@@ -37,25 +83,8 @@ int send_data(string data, int sock){
     return 1;
 }
 
-string random_string(int length){
-    static const char alphanum[] ="0123456789!@#$^&*ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    int stringLength = sizeof(alphanum) - 1;
-    srand(time(NULL));
-    string rand_str("");
-    for(int i = 0; i < length; ++i){
-        rand_str = rand_str + alphanum[rand() % stringLength];
-    }
-    return rand_str;
-}
-
 // Thread to read incoming data (from server)
 void* server_feedback(void* void_listenfd){
-	// OpenSSL stuff {
-  	ERR_load_crypto_strings();
-  	OpenSSL_add_all_algorithms();
-  	OPENSSL_config(NULL);
-  	EVP_add_cipher(EVP_aes_256_cbc());
-  	// OpenSSL stuff }
 	long listenfd = (long)void_listenfd;
 	char buffer[BUFFER_SIZE];
 	char* STRTOK_SHARED;
@@ -75,46 +104,29 @@ void* server_feedback(void* void_listenfd){
 		string command(pch);
 		if(!command.compare("/handshake")){
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-			string alice(pch);
+			string alice(pch), iv(HARDCODED_IV);
 			srand(time(NULL));
 			long nonce_B = long(rand());
 			sent_nonce[alice] = to_string(nonce_B);
-			string iv = random_string(16);
-			// AES stuff {
-           	custom_string kee = my_private_key.c_str(),ivee = iv.c_str();
-           	byte *keye, *IV;
-           	keye = (unsigned char*)kee.c_str();
-           	IV = (unsigned char*)ivee.c_str();
-			string encrypted_packet = encrypt(alice + " " + to_string(nonce_B), keye, IV);
-           	// AES stuff }
+			string encrypted_packet = encrypt(alice + " " + to_string(nonce_B), my_private_key, iv);
 			// Generate a nonce and return it with A, encrypted with Kbs
-			string ret_ticket = "/check_ticket " + alice + " " + iv + " " + encrypted_packet;
+			string ret_ticket = "/check_ticket " + alice  + " " + encrypted_packet;
 			send_data(ret_ticket, listenfd);
 		}
 		else if(!command.compare("/check_ticket")){
 			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
 			string bob(pch);
-			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
-			string iv(pch);
 			// Extract b_ticket
 			string b_ticket(STRTOK_SHARED);
-			srand(time(NULL));
 			// A sends a request to KDC with A,B,nonceA and above packet
+			srand(time(NULL));
 			sent_nonce[bob] = to_string(long(rand()));
-			string send = "/negotiate " +  my_username + " " + bob + " " + sent_nonce[bob] + " " + iv + " " + b_ticket;
+			string send = "/negotiate " +  my_username + " " + bob + " " + sent_nonce[bob] + " " + b_ticket;
 			send_data(send, listenfd);	
 		}
 		else if(!command.compare("/negotiated_key")){
-			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
-			string iv_a(pch);
-			string decr_this(STRTOK_SHARED);
-			// AES stuff {
-           	custom_string kee = my_private_key.c_str(),ivee = iv_a.c_str();
-           	byte *keye, *IV;
-           	keye = (unsigned char*)kee.c_str();
-           	IV = (unsigned char*)ivee.c_str();
-			char *dup = strdup(decrypt(decr_this, keye, IV).c_str());
-           	// AES stuff }
+			string decr_this(STRTOK_SHARED), iv(HARDCODED_IV);
+			char *dup = strdup(decrypt(decr_this, my_private_key, iv).c_str());
 			pch = strtok_r (dup, " ", &STRTOK_SHARED);
 			string nonce_a(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
@@ -131,16 +143,9 @@ void* server_feedback(void* void_listenfd){
 			send_data(send, listenfd);
 		}
 		else if(!command.compare("/bob_receive")){
-			pch = strtok_r(NULL, " ", &STRTOK_SHARED);
-			string iv_b(pch);
+			string iv(HARDCODED_IV);
 			string decryp(STRTOK_SHARED);
-			// AES stuff {
-           	custom_string kee = my_private_key.c_str(),ivee = iv_b.c_str();
-           	byte *keye, *IV;
-           	keye = (unsigned char*)kee.c_str();
-           	IV = (unsigned char*)ivee.c_str();
-           	// AES stuff }
-			char *dup = strdup(decrypt(decryp, keye, IV).c_str());
+			char *dup = strdup(decrypt(decryp, my_private_key, iv).c_str());
 			pch = strtok_r (dup, " ", &STRTOK_SHARED);
 			string k_ab(pch);
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
@@ -163,16 +168,9 @@ void* server_feedback(void* void_listenfd){
 		else if(!command.compare("/msg")){
 			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
 			string bob(pch);
-			pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-			string iv(pch);
+			string iv(HARDCODED_IV);
 			string data(STRTOK_SHARED);
-			// AES stuff {
-           	custom_string kee = shared_keys[bob].c_str(),ivee = iv.c_str();
-           	byte *keye, *IV;
-           	keye = (unsigned char*)kee.c_str();
-           	IV = (unsigned char*)ivee.c_str();
-           	// AES stuff }
-			string message = decrypt(data, keye, IV);
+			string message = decrypt(data, shared_keys[bob], iv);
 			char *dup = strdup(message.c_str());
 			char* pch2 = strtok_r (dup, " ", &STRTOK_SHARED);
 			string enc_len(pch2);
@@ -185,7 +183,6 @@ void* server_feedback(void* void_listenfd){
 			else{
 				cout<<">> Tampered message received!"<<endl;
 			}
-			
 		}
 		else{
 			if(!strcmp("Signed-in!",buffer)){
@@ -225,12 +222,6 @@ int main(int argc, char *argv[]){
 		cout<<"Usage: "<<argv[0]<<" <server ip>"<<endl;
 		return 0;
 	}
-	// OpenSSL stuff {
-  	ERR_load_crypto_strings();
-  	OpenSSL_add_all_algorithms();
-  	OPENSSL_config(NULL);
-  	EVP_add_cipher(EVP_aes_256_cbc());
-  	// OpenSSL stuff }
 	// Establish connection
 	long kdc_sock,register_sock;
 	kdc_sock = create_socket_and_connect(argv[1], KDC_PORT);
@@ -252,11 +243,6 @@ int main(int argc, char *argv[]){
 		if(!command.compare("/register") ){
 			cin>>username;
 			cin>>password;
-			unsigned char hashed[128];
-			// Calculate hash of password
-			// PKCS5_PBKDF2_HMAC(password.c_str(),-1,NULL,0,128,EVP_sha256(),5,hashed);
-			// string hashed_password((const char*)hashed);
-			// send = username + " " + hashed_password;
 			send = username + " " + password;
 			if(!send_data(send, register_sock)){
 				cout<<">> Error in registration. Please try again."<<endl;
@@ -265,22 +251,18 @@ int main(int argc, char *argv[]){
 		else if(!command.compare("/login")){	
 			cin>>username;
 			cin>>password;
-			unsigned char hashed[128];
-			// Calculate hash of password
-			// PKCS5_PBKDF2_HMAC(password.c_str(),-1,NULL,0,128,EVP_sha256(),5,hashed);
-			// string hashed_password((const char*)hashed);
 			if(logged_in){
 				cout<<">> Already logged in!"<<endl;
 			}
 			else{
-				// send = "/login " + username + " " + hashed_password;
-				send = "/login " + username + " " + password;
+				string iv(HARDCODED_IV);
+				string challenge(CHALLENGE);
+				send = "/login " + username + " " + encrypt(challenge,password,iv);
 				if(!send_data(send, kdc_sock)){
 					cout<<">> Error logging-in. Please try again."<<endl;
 				}
 				else{
 					my_username = username;
-					// my_private_key = hashed_password;
 					my_private_key = password;
 				}
 			}
@@ -310,24 +292,23 @@ int main(int argc, char *argv[]){
 		}
 		else if(!command.compare("/msg") && logged_in){
 			cin>>username;
-			if(good_to_go.find(username) != good_to_go.end() && shared_keys.count(username)){
-				getline(cin, password);
-				string iv = random_string(16);
-				// AES stuff {
-           		custom_string kee = shared_keys[username].c_str(),ivee = iv.c_str();
-           		byte *keye, *IV;
-           		keye = (unsigned char*)kee.c_str();
-           		IV = (unsigned char*)ivee.c_str();
-           		// AES stuff }
-           		password = to_string(password.length()) + " " + password;
-				password = encrypt(password, keye, IV);
-				send = command + " " + username + " " + iv + " " + password;
+			try{
+				if(good_to_go.find(username) != good_to_go.end() && shared_keys.count(username)){
+					getline(cin, password);
+					string iv(HARDCODED_IV);
+					password = to_string(password.length()) + " " + password;
+					password = encrypt(password, shared_keys[username], iv);
+					send = command + " " + username + " " + password;
+				}
+				else{
+					cout<<">> Shared key not negotiated. Please run /handshake."<<endl;
+				}
+				if(!send_data(send, kdc_sock)){
+					cout<<">> Error communicating with server. Please try again."<<endl;
+				}
 			}
-			else{
+			catch(...){
 				cout<<">> Shared key not negotiated. Please run /handshake."<<endl;
-			}
-			if(!send_data(send, kdc_sock)){
-				cout<<">> Error communicating with server. Please try again."<<endl;
 			}
 		}
 		else if(!command.compare("/handshake") && logged_in){

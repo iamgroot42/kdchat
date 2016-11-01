@@ -29,6 +29,7 @@ The following commands are supported :
 
 
 ## Running it
+* Install `mcrypt` by running : `apt install libmcrypt-dev`
 * To run the server, run:  ` make`. Then, run it as `./server` (from server folder).
 * To run a client, run:  ` make`. Then, run it as `./client <SERVER ADDRESS>` (from client folder)
 * Run `make clean` to remove compiled programs.

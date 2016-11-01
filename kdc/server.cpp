@@ -7,18 +7,63 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <sys/sendfile.h>
-#include <arpa/inet.h> 
-#include <openssl/conf.h>
-#include <openssl/evp.h>
-#include <openssl/err.h>
-#include "aes.cpp"
+#include <arpa/inet.h>
+#include <mcrypt.h>
 
 #define REGISTER_PORT 5009 //Port for registrations
 #define KDC_PORT 5010 //Port for normal communication
 #define BUFFER_SIZE 1024 //Maximum size per message
 #define USER_FILENAME "users" //Filename containing username & passwords
+#define CHALLENGE "potato"
+#define HARDCODED_IV "0123456789123456"
+
+// Reference for enc/dec : https://gist.github.com/bricef/2436364
 
 using namespace std;
+
+string encrypt(string data, string keye, string IVe){
+    int buffer_len = 16;
+    int mbl = buffer_len*((data.length()/buffer_len) + 1);
+    char* bass = (char*)calloc(1, mbl);
+    strncpy(bass, data.c_str(), data.length());
+    char *IV = strdup(IVe.c_str()), *key = strdup(keye.c_str());
+    int key_len = keye.length();
+    char* bufferr = (char*)calloc(1, buffer_len);
+    string output = "";
+    for(int i=0; i < mbl; i += buffer_len){
+        memcpy(bufferr, bass+i, buffer_len);
+        void* buffer = (void*)bufferr;
+        MCRYPT td = mcrypt_module_open("rijndael-128", NULL, "cbc", NULL);
+        mcrypt_generic_init(td, key, key_len, IV);
+        mcrypt_generic(td, buffer, buffer_len);
+        mcrypt_generic_deinit(td);
+        mcrypt_module_close(td);
+        output = output + (char*)buffer;
+    }
+    return output;
+}
+
+string decrypt(string data, string keye, string IVe){ 
+    int buffer_len = 16;
+    int mbl = data.length();
+    char* bass = (char*)data.c_str();
+    // strncpy(bass, data.c_str(), data.length());
+    char *IV = strdup(IVe.c_str()), *key = strdup(keye.c_str());
+    int key_len = keye.length();
+    char* bufferr = (char*)calloc(1, buffer_len);
+    string output = "";
+    for(int i=0; i < mbl; i += buffer_len){
+        memcpy(bufferr, bass+i, buffer_len);
+        void* buffer = (void*)bufferr;
+        MCRYPT td = mcrypt_module_open("rijndael-128", NULL, "cbc", NULL);
+        mcrypt_generic_init(td, key, key_len, IV);
+        mdecrypt_generic(td, buffer, buffer_len);
+        mcrypt_generic_deinit(td);
+        mcrypt_module_close(td);
+        output = output + (char*)buffer;
+    }
+    return output;
+}
 
 // Create a 1-1 mapping between current socket and username (for efficient access)
 map<string,int> name_id;
@@ -42,7 +87,7 @@ int send_data(string data, int sock)
 }
 
 string random_string(int length){
-    static const char alphanum[] ="0123456789!@#$^&*ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    static const char alphanum[] ="0123456789!#$^&*ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     int stringLength = sizeof(alphanum) - 1;
     srand(time(NULL));
     string rand_str("");
@@ -50,6 +95,20 @@ string random_string(int length){
         rand_str = rand_str + alphanum[rand() % stringLength];
     }
     return rand_str;
+}
+
+string generate_mutual_key(string alice, string bob){
+    string Kas = username_password[alice], Kbs = username_password[bob];
+    int a_length = alice.length(), b_length = bob.length();
+    string shared_key = "";
+    for(int i=0;i<Kas.length();++i){
+        shared_key = shared_key + char((int(Kas[i]) + int(alice[i%a_length])));
+    }
+    shared_key = shared_key + random_string(8);
+    for(int i=0;i<Kbs.length();++i){
+        shared_key = shared_key + char((int(Kbs[i]) + int(bob[i%b_length])));
+    }
+    return shared_key;
 }
 
 // Read registered accounts from file
@@ -143,12 +202,6 @@ void remove_user(int c){
 
 // A thread spawned per connection, to handle all incoming requests from there
 void* per_user(void* void_connfd){
-    // OpenSSL stuff {
-    ERR_load_crypto_strings();
-    OpenSSL_add_all_algorithms();
-    OPENSSL_config(NULL);
-    EVP_add_cipher(EVP_aes_256_cbc());
-    // OpenSSL stuff }
     string current_username;
     long connfd = (long)void_connfd;
     int ohho = 0, logged_in = 0;
@@ -171,9 +224,10 @@ void* per_user(void* void_connfd){
             try{
                 pch = strtok_r (NULL, " ", &STRTOK_SHARED);
                 string username(pch);
-                pch = strtok_r (NULL, " ", &STRTOK_SHARED);
-                string password(pch);
-                if(!username_password[username].compare(password)){
+                string iv(HARDCODED_IV);
+                string enc(STRTOK_SHARED);
+                string challenge(CHALLENGE);
+                if(!decrypt(enc,username_password[username],iv).compare(challenge)){
                     send_data("Signed-in!", connfd);
                     // Update 1-1(effective) mapping of connectionID and username
                     current_username = username;
@@ -217,11 +271,16 @@ void* per_user(void* void_connfd){
             string to(pch);
             pch = strtok_r (NULL, " ", &STRTOK_SHARED);
             string data(pch);
-            if(!is_online(name_id[to])){
+            if(!to.compare(id_name[connfd])){
+                send_data("Don't-try-shaking-your-own-hand!", connfd);
+            }
+            else if(!is_online(name_id[to])){
                 send_data("User is offline/doesn't exist!", connfd);
             }
-            data = command + " " + data;
-            chat.push(make_pair(name_id[to], data)); // Push outgoing message to queue
+            else{
+                data = command + " " + data;
+                chat.push(make_pair(name_id[to], data)); // Push outgoing message to queue
+            }
         }
         else if(!command.compare("/check_ticket") && logged_in){
             pch = strtok_r (NULL, " ", &STRTOK_SHARED);
@@ -254,6 +313,7 @@ void* per_user(void* void_connfd){
         }
        else if(!command.compare("/negotiate") && logged_in){
             try{
+                string iv(HARDCODED_IV);
                 pch = strtok_r(NULL, " ", &STRTOK_SHARED);
                 string alice(pch);
                 // Assert is Alice sent this packet
@@ -262,18 +322,9 @@ void* per_user(void* void_connfd){
                 string bob(pch);
                 pch = strtok_r(NULL, " ", &STRTOK_SHARED);
                 string a_nonce(pch);
-                pch = strtok_r(NULL, " ", &STRTOK_SHARED);
-                string iv(pch);
                 string raw_b_ticket(STRTOK_SHARED);
                 // Decrypt b_ticket to extract B_nonce
-                // AES stuff {
-                custom_string kee = username_password[bob].c_str(),ivee = iv.c_str();
-                byte *keye, *IV;
-                keye = (unsigned char*)kee.c_str();
-                IV = (unsigned char*)ivee.c_str();
-                string b_ticket = decrypt(raw_b_ticket, keye, IV);
-                cout<<"DECRYPTED B-PACKET "<<b_ticket<<endl;
-                // AES stuff }
+                string b_ticket = decrypt(raw_b_ticket, username_password[bob], iv);
                 char *dup = strdup(b_ticket.c_str());
                 char *temp = strtok_r(dup," ", &STRTOK_SHARED);
                 string should_be_alice(temp);
@@ -282,26 +333,12 @@ void* per_user(void* void_connfd){
                 string b_nonce(strtok_r(NULL," ", &STRTOK_SHARED));
                 string b_retticket, Kab;
                 // Come up with Kab 
-                Kab = random_string(32);
+                Kab = generate_mutual_key(alice, bob);
                 b_retticket = Kab + " " + alice + " " + b_nonce;
-                string iv_a,iv_b;
-                iv_a = random_string(16);
-                iv_b = random_string(16);
-                // AES stuff {
-                custom_string ivee2 = iv_b.c_str();
-                byte *IV2;
-                IV2 = (unsigned char*)ivee2.c_str();
-                b_retticket = encrypt(b_retticket, keye, IV2);
-                // AES stuff }
-                string data = a_nonce + " " + Kab + " " + bob + " " + iv_b + " " + b_retticket;
-                // AES stuff {
-                custom_string kee2 = username_password[alice].c_str(),ivee3 = iv_a.c_str();
-                byte *keye2, *IV3;
-                keye2 = (unsigned char*)kee2.c_str();
-                IV3 = (unsigned char*)ivee3.c_str();
-                data = encrypt(data, keye2, IV3);
-                // AES stuff }
-                chat.push(make_pair(name_id[alice], "/negotiated_key " + iv_a + " " + data));
+                string enc_b_ret = encrypt(b_retticket, username_password[bob], iv);
+                string data = a_nonce + " " + Kab + " " + bob  + " " + enc_b_ret;
+                data = encrypt(data, username_password[alice], iv);
+                chat.push(make_pair(name_id[alice], "/negotiated_key " + data));
             }
             catch(...){
                 send_data("Malformed message!", connfd);  
